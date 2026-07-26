@@ -105,9 +105,6 @@
     // Retrieve a DOM element by its ID.
     const $ = id => document.getElementById(id);
     let activeRunId = 0;
-    let autoRunTimer = null;
-    let simulationRunning = false;
-    let simulationPaused = false;
 
     // Append a message to the event log and format it by source.
     const log = (msg, source='sender') => {
@@ -385,56 +382,8 @@
       updateReceiver(receiver.expected, receiver.delivered);
     }
 
-    // Update the button text to reflect the current simulation state.
-    function updateStartButtonLabel(){
-      const button = $('startBtn');
-      if (!simulationRunning) {
-        button.textContent = 'Start';
-      } else if (simulationPaused) {
-        button.textContent = 'Resume';
-      } else {
-        button.textContent = 'Pause';
-      }
-    }
-
-    // Stop the automatic run loop and return the button to Start.
-    function stopAutoRun(){
-      if (autoRunTimer) {
-        clearInterval(autoRunTimer);
-        autoRunTimer = null;
-      }
-      simulationRunning = false;
-      simulationPaused = false;
-      updateStartButtonLabel();
-    }
-
-    // Advance the simulation by one send step while the run is active.
-    function runSimulationStep(){
-      if (!sender || !simulationRunning || simulationPaused) return;
-      sender.sendNext();
-      if (sender.sentCount >= sender.total && sender.unacked.size === 0) {
-        log('Simulation: completed');
-        stopAutoRun();
-      }
-    }
-
-    // Start or resume the automatic simulation loop.
-    function startOrResumeSimulation(){
-      if (!sender) {
-        setupFromUI();
-        log('Simulation: started');
-      }
-      simulationRunning = true;
-      simulationPaused = false;
-      updateStartButtonLabel();
-      if (!autoRunTimer) {
-        autoRunTimer = setInterval(runSimulationStep, 250);
-      }
-    }
-
     // Reset the visual state while keeping the page open.
     function resetSimulationView(){
-      stopAutoRun();
       activeRunId += 1;
       if (sender) {
         sender.runId = activeRunId;
@@ -462,25 +411,9 @@
 
     // Initialize the control buttons once the page has loaded.
     document.addEventListener('DOMContentLoaded', () => {
-      updateStartButtonLabel();
       $('startBtn').addEventListener('click', () => {
-        if (!simulationRunning) {
-          startOrResumeSimulation();
-        } else if (simulationPaused) {
-          simulationPaused = false;
-          updateStartButtonLabel();
-          if (!autoRunTimer) {
-            autoRunTimer = setInterval(runSimulationStep, 250);
-          }
-        } else {
-          simulationPaused = true;
-          updateStartButtonLabel();
-          if (autoRunTimer) {
-            clearInterval(autoRunTimer);
-            autoRunTimer = null;
-          }
-          log('Simulation: paused');
-        }
+        setupFromUI(); log('Simulation: started');
+        while(sender.canSend()) sender.sendNext();
       });
       $('stepBtn').addEventListener('click', () => {
         if (!sender) { log('Call Start first'); return; }
