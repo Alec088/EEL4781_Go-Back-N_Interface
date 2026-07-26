@@ -140,25 +140,40 @@
         this.delivered = 0;
         this.channel = channel;
         this.received = new Set();
+        this.buffer = new Map();
+      }
+      sendAck() {
+        const ackNum = (this.expected + this.K - 1) % this.K;
+        this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+      }
+      acceptPacket(packet) {
+        const seq = packet.seq;
+        log(`Receiver: accepted DATA ${seq}`);
+        this.delivered++;
+        this.received.add(seq);
+        this.expected = (this.expected + 1) % this.K;
+        updateReceiver(this.expected, this.delivered);
+        this.sendAck();
+      }
+      flushBuffered() {
+        while (this.buffer.has(this.expected)) {
+          const nextPacket = this.buffer.get(this.expected);
+          this.buffer.delete(this.expected);
+          this.acceptPacket(nextPacket);
+        }
       }
       onData(packet) {
         const seq = packet.seq;
         if (seq === this.expected) {
-          log(`Receiver: accepted DATA ${seq}`);
-          this.delivered++;
-          this.received.add(seq);
-          this.expected = (this.expected + 1) % this.K;
-          updateReceiver(this.expected, this.delivered);
-          const ackNum = (this.expected + this.K - 1) % this.K;
-          this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+          this.acceptPacket(packet);
+          this.flushBuffered();
         } else if (this.received.has(seq)) {
           log(`Receiver: duplicate DATA ${seq}; re-acknowledging`);
-          const ackNum = (this.expected + this.K - 1) % this.K;
-          this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+          this.sendAck();
         } else {
-          log(`Receiver: discarded out-of-order DATA ${seq}, expected ${this.expected}`);
-          const ackNum = (this.expected + this.K - 1) % this.K;
-          this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+          this.buffer.set(seq, packet);
+          log(`Receiver: buffered DATA ${seq}, expected ${this.expected}`);
+          this.sendAck();
         }
       }
     }
