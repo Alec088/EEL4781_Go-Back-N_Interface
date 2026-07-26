@@ -54,15 +54,21 @@ class Receiver {
     this.expected = 0; // next expected seq
     this.delivered = 0;
     this.channel = channel;
+    this.received = new Set();
   }
   onData(packet) {
     const seq = packet.seq;
     if (seq === this.expected) {
       log(`Receiver: accepted DATA ${seq}`);
       this.delivered++;
+      this.received.add(seq);
       this.expected = (this.expected + 1) % this.K;
       updateReceiver(this.expected, this.delivered);
       // send cumulative ACK for last in-order received (i.e., expected-1)
+      const ackNum = (this.expected + this.K - 1) % this.K;
+      this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+    } else if (this.received.has(seq)) {
+      log(`Receiver: duplicate DATA ${seq}; re-acknowledging`);
       const ackNum = (this.expected + this.K - 1) % this.K;
       this.channel.sendAck(ackNum, sender.onAck.bind(sender));
     } else {
@@ -83,6 +89,8 @@ class Sender {
     this.unacked = new Set();
     this.timeoutCount = 0;
     this.maxTimeouts = Math.max(3, Math.ceil(this.total / 4));
+    this.stepCount = 0;
+    this.startTime = Date.now();
     for (let i=0;i<total;i++) this.buffer.push({seq:i%K,payload:`pkt${i}`});
   }
   canSend() { return ((this.nextSeq - this.base + this.K) % this.K) < this.N && this.sentCount < this.total; }
@@ -94,6 +102,7 @@ class Sender {
     this.channel.sendData(packet, receiver.onData.bind(receiver));
     this.unacked.add(packet.seq);
     this.sentCount++;
+    this.stepCount++;
     this.nextSeq = (this.nextSeq + 1) % this.K;
     updateSender(this.base, this.nextSeq, this.unacked);
     if (!this.timer) this.startTimer();
@@ -145,7 +154,8 @@ class Sender {
     while(this.canSend()) this.sendNext();
     // finished?
     if (this.sentCount>=this.total && this.unacked.size===0) {
-      log('Sender: all packets acknowledged — transmission complete');
+      const elapsedSeconds = ((Date.now() - this.startTime) / 1000).toFixed(2);
+      log(`Sender: all packets acknowledged — transmission complete in ${this.stepCount} steps, ${elapsedSeconds}s`);
     }
   }
 }
