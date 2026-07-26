@@ -344,7 +344,7 @@
         }
         if (!unacked.has(seq) && (seq < sender.nextSeq || sender.sentCount >= sender.total)) div.classList.add('acked');
         if (unacked.has(seq)) div.classList.add('sent');
-        if (droppedSeqs.has(seq) && !unacked.has(seq) && !div.classList.contains('acked')) div.classList.add('dropped');
+        if (droppedSeqs.has(seq) && !div.classList.contains('acked')) div.classList.add('dropped');
         win.appendChild(div);
       }
     }
