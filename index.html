@@ -55,7 +55,8 @@
       <div class="buttons">
         <button id="startBtn">Start</button>
         <button id="stepBtn">Step</button>
-        <button id="resetBtn">Reset</button>
+        <button id="resetBtn">Reset View</button>
+        <button id="fullResetBtn">Reset All</button>
       </div>
     </section>
 
@@ -335,6 +336,31 @@
       updateReceiver(receiver.expected, receiver.delivered);
     }
 
+    function resetSimulationView(){
+      if (!sender) {
+        $('senderWindow').innerHTML = '';
+        $('channelArea').textContent = '(packets in flight)';
+        $('receiverState').textContent = '';
+        $('logArea').textContent = '';
+        $('sentCount').textContent = 'Sent: 0';
+        $('recvCount').textContent = 'Delivered: 0';
+        $('retransCount').textContent = 'Retransmissions: 0';
+        return;
+      }
+
+      sender = null;
+      receiver = null;
+      channel = null;
+      $('senderWindow').innerHTML = '';
+      $('channelArea').textContent = '(packets in flight)';
+      $('receiverState').textContent = '';
+      $('logArea').textContent = '';
+      $('sentCount').textContent = 'Sent: 0';
+      $('recvCount').textContent = 'Delivered: 0';
+      $('retransCount').textContent = 'Retransmissions: 0';
+      log('Simulation: reset');
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       $('startBtn').addEventListener('click', () => {
         setupFromUI(); log('Simulation: started');
@@ -344,7 +370,8 @@
         if (!sender) { log('Call Start first'); return; }
         if (!sender.sendNext()) log('Step: nothing to send now');
       });
-      $('resetBtn').addEventListener('click', () => { location.reload(); });
+      $('resetBtn').addEventListener('click', () => { resetSimulationView(); });
+      $('fullResetBtn').addEventListener('click', () => { location.reload(); });
     });
   </script>
 </body>
