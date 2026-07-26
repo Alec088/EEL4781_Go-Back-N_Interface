@@ -49,6 +49,7 @@
   </header>
 
   <main>
+    <!-- The controls let you set the protocol parameters before running the simulation. -->
     <section class="controls">
       <label>Window size (N): <input id="winSize" type="number" value="4" min="1" max="10" /></label>
       <label>Sequence Numbers (K): <input id="seqK" type="number" value="8" min="2" max="256" /></label>
@@ -100,10 +101,12 @@
   <footer class="page-footer">EEL4781 - Go-Back-N Programming Project - Alec Hayes</footer>
 
   <script>
-    // Go-Back-N simulator (sender, receiver, channel)
+    // Core simulator objects: sender, receiver, and channel.
+    // Retrieve a DOM element by its ID.
     const $ = id => document.getElementById(id);
     let activeRunId = 0;
 
+    // Append a message to the event log and format it by source.
     const log = (msg, source='sender') => {
       const area = $('logArea');
       const time = new Date().toLocaleTimeString();
@@ -117,6 +120,7 @@
     };
 
     class Channel {
+      // Create a channel with a delay and configured drop rules.
       constructor(delay, dropDataSet, dropAckSet) {
         this.delay = delay;
         this.dropData = dropDataSet;
@@ -125,18 +129,21 @@
         this.droppedAckSeqs = new Set();
         this.runId = activeRunId;
       }
+      // Decide whether a data packet should be dropped.
       shouldDropData(seq) {
         if (!this.dropData.has(seq)) return false;
         if (this.droppedDataSeqs.has(seq)) return false;
         this.droppedDataSeqs.add(seq);
         return true;
       }
+      // Decide whether an ACK should be dropped.
       shouldDropAck(seq) {
         if (!this.dropAck.has(seq)) return false;
         if (this.droppedAckSeqs.has(seq)) return false;
         this.droppedAckSeqs.add(seq);
         return true;
       }
+      // Send a data packet through the channel with the configured delay.
       sendData(packet, toReceiver) {
         const shouldDrop = this.shouldDropData(packet.seq);
         const runId = this.runId;
@@ -151,6 +158,7 @@
           toReceiver(packet);
         }, this.delay);
       }
+      // Send an ACK through the channel with the configured delay.
       sendAck(ackNum, toSender) {
         const shouldDrop = this.shouldDropAck(ackNum);
         const runId = this.runId;
@@ -168,6 +176,7 @@
     }
 
     class Receiver {
+      // Create a receiver with the expected sequence window and link to the channel.
       constructor(K, channel) {
         this.K = K;
         this.expected = 0;
@@ -177,10 +186,12 @@
         this.buffer = new Map();
         this.runId = activeRunId;
       }
+      // Send an ACK back to the sender based on the expected packet.
       sendAck() {
         const ackNum = (this.expected + this.K - 1) % this.K;
         this.channel.sendAck(ackNum, sender.onAck.bind(sender));
       }
+      // Accept a packet and update the receiver state.
       acceptPacket(packet) {
         const seq = packet.seq;
         log(`Receiver: accepted DATA ${seq}`, 'receiver');
@@ -190,6 +201,7 @@
         updateReceiver(this.expected, this.delivered);
         this.sendAck();
       }
+      // Deliver any buffered packets that are now in order.
       flushBuffered() {
         while (this.buffer.has(this.expected)) {
           const nextPacket = this.buffer.get(this.expected);
@@ -197,6 +209,7 @@
           this.acceptPacket(nextPacket);
         }
       }
+      // Handle incoming data from the channel.
       onData(packet) {
         if (this.runId !== activeRunId) return;
         const seq = packet.seq;
@@ -215,6 +228,7 @@
     }
 
     class Sender {
+      // Create a sender with the window size, sequence range, and packet list.
       constructor(N, K, total, channel, rto=1500) {
         this.N = N; this.K = K; this.total = total; this.channel = channel; this.rto = rto;
         this.base = 0; this.nextSeq = 0; this.sentCount = 0; this.retrans = 0;
@@ -226,7 +240,9 @@
         this.startTime = Date.now();
         for (let i=0;i<total;i++) this.buffer.push({seq:i%K,payload:`pkt${i}`});
       }
+      // Check whether another packet can be sent in the current window.
       canSend() { return ((this.nextSeq - this.base + this.K) % this.K) < this.N && this.sentCount < this.total; }
+      // Send the next packet if the window allows it.
       sendNext() {
         if (this.runId !== activeRunId) return false;
         if (!this.canSend()) return false;
@@ -242,6 +258,7 @@
         $('sentCount').textContent = `Sent: ${this.sentCount}`;
         return true;
       }
+      // Start or restart the retransmission timer.
       startTimer() {
         if (this.runId !== activeRunId) return;
         this.stopTimer();
@@ -250,7 +267,9 @@
           this.timeout();
         }, this.rto);
       }
+      // Stop the current retransmission timer.
       stopTimer(){ if(this.timer){clearTimeout(this.timer);this.timer=null;} }
+      // Retransmit all packets that are still unacknowledged.
       timeout(){
         if (this.runId !== activeRunId) return;
         this.retrans += this.unacked.size;
@@ -265,6 +284,7 @@
         }
         this.startTimer();
       }
+      // Handle an incoming ACK and advance the sender window.
       onAck(ackNum){
         if (this.runId !== activeRunId) return;
         log(`Sender: received ACK ${ackNum}`, 'sender');
@@ -294,11 +314,13 @@
       }
     }
 
+    // Check whether a sequence number lies inside the given range.
     function inRange(a,b,x,K){
       if (a <= b) return x >= a && x <= b;
       return x >= a || x <= b;
     }
 
+    // Check whether a sequence number is inside the sender window.
     function isInWindow(seq, base, size, K){
       if (size <= 0) return false;
       const start = base % K;
@@ -306,6 +328,7 @@
       return offset < size;
     }
 
+    // Rebuild the sender window display from the current state.
     function updateSender(base,nextSeq,unacked){
       const win = $('senderWindow'); win.innerHTML='';
       const N = parseInt($('winSize').value,10);
@@ -325,19 +348,24 @@
         win.appendChild(div);
       }
     }
+    // Update the receiver panel and the delivery counter.
     function updateReceiver(expected, delivered){
       const el = $('receiverState'); el.textContent = `expected=${expected} delivered=${delivered}`;
       $('recvCount').textContent = `Delivered: ${delivered}`;
     }
+    // Show the current packet or ACK in the channel panel.
     function showInChannel(txt){ $('channelArea').textContent = txt; }
+    // Clear the channel panel after a transmission completes.
     function removeFromChannel(){ $('channelArea').textContent = '(packets in flight)'; }
 
     let sender, receiver, channel;
+    // Convert comma-separated input into a set of sequence numbers for drops.
     function parseList(s){
       if (!s) return new Set();
       return new Set(s.split(',').map(x => parseInt(x.trim(),10)).filter(x => !isNaN(x)));
     }
 
+    // Build a fresh simulation from the values currently shown in the UI.
     function setupFromUI(){
       activeRunId += 1;
       const N = parseInt($('winSize').value,10);
@@ -354,6 +382,7 @@
       updateReceiver(receiver.expected, receiver.delivered);
     }
 
+    // Reset the visual state while keeping the page open.
     function resetSimulationView(){
       activeRunId += 1;
       if (sender) {
@@ -380,6 +409,7 @@
       $('retransCount').textContent = 'Retransmissions: 0';
     }
 
+    // Initialize the control buttons once the page has loaded.
     document.addEventListener('DOMContentLoaded', () => {
       $('startBtn').addEventListener('click', () => {
         setupFromUI(); log('Simulation: started');
