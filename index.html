@@ -238,8 +238,32 @@
         this.stepCount++;
         this.nextSeq = (this.nextSeq + 1) % this.K;
         updateSender(this.base, this.nextSeq, this.unacked);
+        if (!this.timer) this.startTimer();
         $('sentCount').textContent = `Sent: ${this.sentCount}`;
         return true;
+      }
+      startTimer() {
+        if (this.runId !== activeRunId) return;
+        this.stopTimer();
+        this.timer = setTimeout(() => {
+          if (this.runId !== activeRunId) return;
+          this.timeout();
+        }, this.rto);
+      }
+      stopTimer(){ if(this.timer){clearTimeout(this.timer);this.timer=null;} }
+      timeout(){
+        if (this.runId !== activeRunId) return;
+        this.retrans += this.unacked.size;
+        $('retransCount').textContent = `Retransmissions: ${this.retrans}`;
+        log('Sender: retransmitting outstanding packets', 'sender');
+        for (let i=0;i<this.sentCount;i++){
+          const p = this.buffer[i];
+          if (this.unacked.has(p.seq)){
+            log(`Sender: retransmit DATA ${p.seq}`, 'sender');
+            this.channel.sendData(p, receiver.onData.bind(receiver));
+          }
+        }
+        this.startTimer();
       }
       onAck(ackNum){
         if (this.runId !== activeRunId) return;
@@ -261,6 +285,7 @@
         removeList.forEach(s => this.unacked.delete(s));
         this.base = newBase;
         updateSender(this.base, this.nextSeq, this.unacked);
+        if (this.unacked.size === 0) this.stopTimer(); else this.startTimer();
         while(this.canSend()) this.sendNext();
         if (this.sentCount >= this.total && this.unacked.size === 0) {
           const elapsedSeconds = ((Date.now() - this.startTime) / 1000).toFixed(2);
