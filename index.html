@@ -4,7 +4,33 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Go-Back-N Simulator</title>
-  <link rel="stylesheet" href="style.css" />
+  <style>
+    :root{--bg:#f7f8fb;--panel:#fff;--accent:#2b7cff;--muted:#666}
+    body{font-family:system-ui,Segoe UI,Helvetica,Arial;background:var(--bg);color:#111;margin:0;padding:16px}
+    header h1{margin:0 0 12px}
+    main{display:grid;grid-template-columns:1fr;gap:12px}
+    .page-footer{margin-top:8px;text-align:center;font-size:12px;color:#6b7280}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--panel);padding:10px;border-radius:8px}
+    .controls label{font-size:14px}
+    .controls input{margin-left:6px;padding:4px}
+    .buttons{display:flex;gap:6px}
+    .visual{display:flex;gap:12px}
+    .panel{flex:1;background:var(--panel);padding:12px;border-radius:8px;min-height:80px}
+    .window,.channel,.receiver{min-height:60px;padding:6px;border:1px dashed #ddd;background:#fafafa}
+    .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:12px;color:#4b5563}
+    .legend-item{display:flex;align-items:center;gap:6px}
+    .legend-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid #d1d5db}
+    .legend-swatch.neutral{background:#eee}
+    .legend-swatch.sent{background:#dff2d8}
+    .legend-swatch.acked{background:#b3e5ff}
+    #senderWindow .slot{display:inline-block;padding:6px 10px;margin:4px;border-radius:4px;background:#eee}
+    #senderWindow .sent{background:#dff2d8}
+    #senderWindow .acked{background:#b3e5ff}
+    #senderWindow .current{box-shadow:0 0 0 3px rgba(43,124,255,0.12)}
+    .log{background:var(--panel);padding:12px;border-radius:8px}
+    #logArea{height:200px;overflow:auto;background:#0f1720;color:#e6ffe6;padding:8px;border-radius:4px}
+    .stats{display:flex;gap:12px;margin-top:8px}
+  </style>
 </head>
 <body>
   <header>
@@ -59,6 +85,205 @@
 
   <footer class="page-footer">EEL4781 - Go-Back-N Programming Project - Alec Hayes</footer>
 
-  <script src="app.js"></script>
+  <script>
+    // Go-Back-N simulator (sender, receiver, channel)
+    const $ = id => document.getElementById(id);
+    const log = msg => {
+      const area = $('logArea');
+      const time = new Date().toLocaleTimeString();
+      area.textContent += `[${time}] ${msg}\n`;
+      area.scrollTop = area.scrollHeight;
+    };
+
+    class Channel {
+      constructor(delay, dropDataSet, dropAckSet) {
+        this.delay = delay;
+        this.dropData = dropDataSet;
+        this.dropAck = dropAckSet;
+      }
+      sendData(packet, toReceiver) {
+        const shouldDrop = this.dropData.has(packet.seq);
+        showInChannel(`${packet.seq}`);
+        setTimeout(() => {
+          removeFromChannel();
+          if (shouldDrop) {
+            log(`Channel: dropped DATA ${packet.seq}`);
+            return;
+          }
+          toReceiver(packet);
+        }, this.delay);
+      }
+      sendAck(ackNum, toSender) {
+        const shouldDrop = this.dropAck.has(ackNum);
+        showInChannel(`ACK ${ackNum}`);
+        setTimeout(() => {
+          removeFromChannel();
+          if (shouldDrop) {
+            log(`Channel: dropped ACK ${ackNum}`);
+            return;
+          }
+          toSender(ackNum);
+        }, this.delay);
+      }
+    }
+
+    class Receiver {
+      constructor(K, channel) {
+        this.K = K;
+        this.expected = 0;
+        this.delivered = 0;
+        this.channel = channel;
+        this.received = new Set();
+      }
+      onData(packet) {
+        const seq = packet.seq;
+        if (seq === this.expected) {
+          log(`Receiver: accepted DATA ${seq}`);
+          this.delivered++;
+          this.received.add(seq);
+          this.expected = (this.expected + 1) % this.K;
+          updateReceiver(this.expected, this.delivered);
+          const ackNum = (this.expected + this.K - 1) % this.K;
+          this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+        } else if (this.received.has(seq)) {
+          log(`Receiver: duplicate DATA ${seq}; re-acknowledging`);
+          const ackNum = (this.expected + this.K - 1) % this.K;
+          this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+        } else {
+          log(`Receiver: discarded out-of-order DATA ${seq}, expected ${this.expected}`);
+          const ackNum = (this.expected + this.K - 1) % this.K;
+          this.channel.sendAck(ackNum, sender.onAck.bind(sender));
+        }
+      }
+    }
+
+    class Sender {
+      constructor(N, K, total, channel, rto=1500) {
+        this.N = N; this.K = K; this.total = total; this.channel = channel; this.rto = rto;
+        this.base = 0; this.nextSeq = 0; this.sentCount = 0; this.retrans = 0;
+        this.timer = null; this.buffer = [];
+        this.unacked = new Set();
+        this.timeoutCount = 0;
+        this.maxTimeouts = Math.max(3, Math.ceil(this.total / 4));
+        this.stepCount = 0;
+        this.startTime = Date.now();
+        for (let i=0;i<total;i++) this.buffer.push({seq:i%K,payload:`pkt${i}`});
+      }
+      canSend() { return ((this.nextSeq - this.base + this.K) % this.K) < this.N && this.sentCount < this.total; }
+      sendNext() {
+        if (!this.canSend()) return false;
+        const packet = this.buffer[this.sentCount];
+        log(`Sender: sending DATA ${packet.seq}`);
+        this.channel.sendData(packet, receiver.onData.bind(receiver));
+        this.unacked.add(packet.seq);
+        this.sentCount++;
+        this.stepCount++;
+        this.nextSeq = (this.nextSeq + 1) % this.K;
+        updateSender(this.base, this.nextSeq, this.unacked);
+        if (!this.timer) this.startTimer();
+        $('sentCount').textContent = `Sent: ${this.sentCount}`;
+        return true;
+      }
+      startTimer() {
+        this.stopTimer();
+        this.timer = setTimeout(() => this.timeout(), this.rto);
+      }
+      stopTimer(){ if(this.timer){clearTimeout(this.timer);this.timer=null;} }
+      timeout(){
+        this.timeoutCount += 1;
+        if (this.timeoutCount > this.maxTimeouts) {
+          log(`Sender: retransmission limit reached (${this.maxTimeouts}); stopping`);
+          this.stopTimer();
+          return;
+        }
+
+        log(`Sender: timeout ${this.timeoutCount}/${this.maxTimeouts} — retransmitting from base ${this.base}`);
+        this.retrans += this.unacked.size;
+        $('retransCount').textContent = `Retransmissions: ${this.retrans}`;
+        for (let i=0;i<this.sentCount;i++){
+          const p = this.buffer[i];
+          if (this.unacked.has(p.seq)){
+            log(`Sender: retransmit DATA ${p.seq}`);
+            this.channel.sendData(p, receiver.onData.bind(receiver));
+          }
+        }
+        this.startTimer();
+      }
+      onAck(ackNum){
+        log(`Sender: received ACK ${ackNum}`);
+        const newBase = (ackNum + 1) % this.K;
+        const removeList = [];
+        for (let s of this.unacked){
+          if (inRange(this.base, ackNum, s, this.K)) removeList.push(s);
+        }
+        removeList.forEach(s => this.unacked.delete(s));
+        this.base = newBase;
+        updateSender(this.base, this.nextSeq, this.unacked);
+        if (this.unacked.size === 0) this.stopTimer(); else this.startTimer();
+        while(this.canSend()) this.sendNext();
+        if (this.sentCount >= this.total && this.unacked.size === 0) {
+          const elapsedSeconds = ((Date.now() - this.startTime) / 1000).toFixed(2);
+          log(`Sender: all packets acknowledged — transmission complete in ${this.stepCount} steps, ${elapsedSeconds}s`);
+        }
+      }
+    }
+
+    function inRange(a,b,x,K){
+      if (a <= b) return x >= a && x <= b;
+      return x >= a || x <= b;
+    }
+
+    function updateSender(base,nextSeq,unacked){
+      const win = $('senderWindow'); win.innerHTML='';
+      const N = parseInt($('winSize').value,10);
+      for (let i=0;i<N;i++){
+        const seq = (base+i) % sender.K;
+        const div = document.createElement('div'); div.className='slot'; div.textContent=seq;
+        if (!unacked.has(seq) && (seq < sender.nextSeq || sender.sentCount >= sender.total)) div.classList.add('acked');
+        if (unacked.has(seq)) div.classList.add('sent');
+        if (i===0) div.classList.add('current');
+        win.appendChild(div);
+      }
+    }
+    function updateReceiver(expected, delivered){
+      const el = $('receiverState'); el.textContent = `expected=${expected} delivered=${delivered}`;
+      $('recvCount').textContent = `Delivered: ${delivered}`;
+    }
+    function showInChannel(txt){ $('channelArea').textContent = txt; }
+    function removeFromChannel(){ $('channelArea').textContent = '(packets in flight)'; }
+
+    let sender, receiver, channel;
+    function parseList(s){
+      if (!s) return new Set();
+      return new Set(s.split(',').map(x => parseInt(x.trim(),10)).filter(x => !isNaN(x)));
+    }
+
+    function setupFromUI(){
+      const N = parseInt($('winSize').value,10);
+      const K = parseInt($('seqK').value,10);
+      const total = parseInt($('totalPackets').value,10);
+      const delay = parseInt($('delay').value,10);
+      const drops = parseList($('dropData').value);
+      const ackDrops = parseList($('dropAck').value);
+      channel = new Channel(delay, drops, ackDrops);
+      sender = new Sender(N,K,total,channel, Math.max(300, delay*3));
+      receiver = new Receiver(K, channel);
+      window.sender = sender; window.receiver = receiver;
+      updateSender(sender.base, sender.nextSeq, sender.unacked);
+      updateReceiver(receiver.expected, receiver.delivered);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      $('startBtn').addEventListener('click', () => {
+        setupFromUI(); log('Simulation: started');
+        while(sender.canSend()) sender.sendNext();
+      });
+      $('stepBtn').addEventListener('click', () => {
+        if (!sender) { log('Call Start first'); return; }
+        if (!sender.sendNext()) log('Step: nothing to send now');
+      });
+      $('resetBtn').addEventListener('click', () => { location.reload(); });
+    });
+  </script>
 </body>
 </html>
