@@ -21,12 +21,17 @@
     .legend-item{display:flex;align-items:center;gap:6px}
     .legend-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid #d1d5db}
     .legend-swatch.neutral{background:#eee}
+    .legend-swatch.in-window{background:#dbeafe;border-color:#2b7cff}
+    .legend-swatch.outside-window{background:#f3f4f6;border-color:#cbd5e1}
     .legend-swatch.sent{background:#dff2d8}
     .legend-swatch.acked{background:#b3e5ff}
-    #senderWindow .slot{display:inline-block;padding:6px 10px;margin:4px;border-radius:4px;background:#eee}
-    #senderWindow .sent{background:#dff2d8}
-    #senderWindow .acked{background:#b3e5ff}
-    #senderWindow .current{box-shadow:0 0 0 3px rgba(43,124,255,0.12)}
+    #senderWindow{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
+    #senderWindow .slot{display:inline-block;padding:6px 10px;margin:2px;border-radius:6px;background:#f3f4f6;border:1px solid #cbd5e1;color:#4b5563;min-width:22px;text-align:center}
+    #senderWindow .slot.in-window{background:#dbeafe;border-color:#2b7cff;color:#1d4ed8;font-weight:600}
+    #senderWindow .slot.outside-window{background:#f3f4f6;border-style:dashed;color:#6b7280}
+    #senderWindow .slot.sent{background:#dff2d8}
+    #senderWindow .slot.acked{background:#b3e5ff}
+    #senderWindow .slot.current{box-shadow:0 0 0 3px rgba(43,124,255,0.12)}
     .log{background:var(--panel);padding:12px;border-radius:8px}
     #logArea{height:200px;overflow:auto;background:#0f1720;color:#e6ffe6;padding:8px;border-radius:4px}
     .stats{display:flex;gap:12px;margin-top:8px}
@@ -57,7 +62,8 @@
         <h2>Sender Window</h2>
         <div id="senderWindow" class="window"></div>
         <div class="legend">
-          <span class="legend-item"><span class="legend-swatch neutral"></span> Default</span>
+          <span class="legend-item"><span class="legend-swatch in-window"></span> Inside sender window</span>
+          <span class="legend-item"><span class="legend-swatch outside-window"></span> Outside sender window</span>
           <span class="legend-item"><span class="legend-swatch sent"></span> Sent / Unacked</span>
           <span class="legend-item"><span class="legend-swatch acked"></span> ACKed / Completed</span>
         </div>
@@ -233,15 +239,27 @@
       return x >= a || x <= b;
     }
 
+    function isInWindow(seq, base, size, K){
+      if (size <= 0) return false;
+      const start = base % K;
+      const offset = (seq - start + K) % K;
+      return offset < size;
+    }
+
     function updateSender(base,nextSeq,unacked){
       const win = $('senderWindow'); win.innerHTML='';
       const N = parseInt($('winSize').value,10);
-      for (let i=0;i<N;i++){
-        const seq = (base+i) % sender.K;
+      const windowSize = Math.min(Math.max(N, 1), sender.K);
+      for (let seq=0; seq<sender.K; seq++){
         const div = document.createElement('div'); div.className='slot'; div.textContent=seq;
+        if (isInWindow(seq, base, windowSize, sender.K)) {
+          div.classList.add('in-window');
+          if (seq === base % sender.K) div.classList.add('current');
+        } else {
+          div.classList.add('outside-window');
+        }
         if (!unacked.has(seq) && (seq < sender.nextSeq || sender.sentCount >= sender.total)) div.classList.add('acked');
         if (unacked.has(seq)) div.classList.add('sent');
-        if (i===0) div.classList.add('current');
         win.appendChild(div);
       }
     }
