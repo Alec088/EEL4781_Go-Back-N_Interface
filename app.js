@@ -81,6 +81,8 @@ class Sender {
     this.base = 0; this.nextSeq = 0; this.sentCount = 0; this.retrans = 0;
     this.timer = null; this.buffer = []; // payload placeholders
     this.unacked = new Set();
+    this.timeoutCount = 0;
+    this.maxTimeouts = Math.max(3, Math.ceil(this.total / 4));
     for (let i=0;i<total;i++) this.buffer.push({seq:i%K,payload:`pkt${i}`});
   }
   canSend() { return ((this.nextSeq - this.base + this.K) % this.K) < this.N && this.sentCount < this.total; }
@@ -104,7 +106,14 @@ class Sender {
   }
   stopTimer(){ if(this.timer){clearTimeout(this.timer);this.timer=null;} }
   timeout(){
-    log(`Sender: timeout — retransmitting from base ${this.base}`);
+    this.timeoutCount += 1;
+    if (this.timeoutCount > this.maxTimeouts) {
+      log(`Sender: retransmission limit reached (${this.maxTimeouts}); stopping`);
+      this.stopTimer();
+      return;
+    }
+
+    log(`Sender: timeout ${this.timeoutCount}/${this.maxTimeouts} — retransmitting from base ${this.base}`);
     this.retrans += this.unacked.size;
     $('retransCount').textContent = `Retransmissions: ${this.retrans}`;
     // retransmit all unacked in window starting at base
