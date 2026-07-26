@@ -172,6 +172,7 @@
         this.timeoutCount = 0;
         this.maxTimeouts = Math.max(3, Math.ceil(this.total / 4));
         this.stepCount = 0;
+        this.lastAck = -1;
         this.startTime = Date.now();
         for (let i=0;i<total;i++) this.buffer.push({seq:i%K,payload:`pkt${i}`});
       }
@@ -217,10 +218,17 @@
       }
       onAck(ackNum){
         log(`Sender: received ACK ${ackNum}`);
+        const delta = (ackNum - this.lastAck + this.K) % this.K;
+        if (delta === 0) {
+          log(`Sender: duplicate ACK ${ackNum}; ignoring`);
+          return;
+        }
+        this.lastAck = ackNum;
         const newBase = (ackNum + 1) % this.K;
         const removeList = [];
         for (let s of this.unacked){
-          if (inRange(this.base, ackNum, s, this.K)) removeList.push(s);
+          const distance = (s - this.base + this.K) % this.K;
+          if (distance >= 0 && distance <= delta) removeList.push(s);
         }
         removeList.forEach(s => this.unacked.delete(s));
         this.base = newBase;
