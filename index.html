@@ -24,12 +24,14 @@
     .legend-swatch.in-window{background:#dbeafe;border-color:#2b7cff}
     .legend-swatch.outside-window{background:#f3f4f6;border-color:#cbd5e1}
     .legend-swatch.sent{background:#dff2d8}
+    .legend-swatch.dropped{background:#fde68a;border-color:#d97706}
     .legend-swatch.acked{background:#b3e5ff}
     #senderWindow{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
     #senderWindow .slot{display:inline-block;padding:6px 10px;margin:2px;border-radius:6px;background:#f3f4f6;border:1px solid #cbd5e1;color:#4b5563;min-width:22px;text-align:center}
     #senderWindow .slot.in-window{background:#dbeafe;border-color:#2b7cff;color:#1d4ed8;font-weight:600}
     #senderWindow .slot.outside-window{background:#f3f4f6;border-style:dashed;color:#6b7280}
     #senderWindow .slot.sent{background:#dff2d8}
+    #senderWindow .slot.dropped{background:#fde68a;border-color:#d97706;color:#92400e}
     #senderWindow .slot.acked{background:#b3e5ff}
     #senderWindow .slot.current{box-shadow:0 0 0 3px rgba(43,124,255,0.12)}
     .log{background:var(--panel);padding:12px;border-radius:8px}
@@ -65,6 +67,7 @@
           <span class="legend-item"><span class="legend-swatch in-window"></span> Inside sender window</span>
           <span class="legend-item"><span class="legend-swatch outside-window"></span> Outside sender window</span>
           <span class="legend-item"><span class="legend-swatch sent"></span> Sent / Unacked</span>
+          <span class="legend-item"><span class="legend-swatch dropped"></span> Data dropped / awaiting recovery</span>
           <span class="legend-item"><span class="legend-swatch acked"></span> ACKed / Completed</span>
         </div>
       </div>
@@ -106,9 +109,23 @@
         this.delay = delay;
         this.dropData = dropDataSet;
         this.dropAck = dropAckSet;
+        this.droppedDataSeqs = new Set();
+        this.droppedAckSeqs = new Set();
+      }
+      shouldDropData(seq) {
+        if (!this.dropData.has(seq)) return false;
+        if (this.droppedDataSeqs.has(seq)) return false;
+        this.droppedDataSeqs.add(seq);
+        return true;
+      }
+      shouldDropAck(seq) {
+        if (!this.dropAck.has(seq)) return false;
+        if (this.droppedAckSeqs.has(seq)) return false;
+        this.droppedAckSeqs.add(seq);
+        return true;
       }
       sendData(packet, toReceiver) {
-        const shouldDrop = this.dropData.has(packet.seq);
+        const shouldDrop = this.shouldDropData(packet.seq);
         showInChannel(`${packet.seq}`);
         setTimeout(() => {
           removeFromChannel();
@@ -120,7 +137,7 @@
         }, this.delay);
       }
       sendAck(ackNum, toSender) {
-        const shouldDrop = this.dropAck.has(ackNum);
+        const shouldDrop = this.shouldDropAck(ackNum);
         showInChannel(`ACK ${ackNum}`);
         setTimeout(() => {
           removeFromChannel();
@@ -275,6 +292,7 @@
       const win = $('senderWindow'); win.innerHTML='';
       const N = parseInt($('winSize').value,10);
       const windowSize = Math.min(Math.max(N, 1), sender.K);
+      const droppedSeqs = channel ? channel.droppedDataSeqs : new Set();
       for (let seq=0; seq<sender.K; seq++){
         const div = document.createElement('div'); div.className='slot'; div.textContent=seq;
         if (isInWindow(seq, base, windowSize, sender.K)) {
@@ -285,6 +303,7 @@
         }
         if (!unacked.has(seq) && (seq < sender.nextSeq || sender.sentCount >= sender.total)) div.classList.add('acked');
         if (unacked.has(seq)) div.classList.add('sent');
+        if (droppedSeqs.has(seq) && !div.classList.contains('acked')) div.classList.add('dropped');
         win.appendChild(div);
       }
     }
