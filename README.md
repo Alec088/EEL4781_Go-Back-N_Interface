@@ -1,27 +1,35 @@
-# Go-Back-N Protocol Simulator (JavaScript)
+# Go-Back-N Protocol Simulator
 
-This is a browser-based simulator of the Go-Back-N reliable data transfer protocol. It is implemented in plain HTML/CSS/JavaScript and can be hosted via GitHub Pages.
+This is a browser-based simulator of the Go-Back-N reliable data transfer protocol. It is implemented as a single self-contained HTML file and can be opened directly in a browser or hosted on GitHub Pages.
 
-Files created:
+## What’s included
 
-- `index.html` — main UI.
-- `style.css` — basic styles.
-- `app.js` — simulator logic (sender, receiver, channel).
+- A simple interactive UI for configuring the simulator
+- A sender window with color-coded packet states
+- A channel view for in-flight data and ACKs
+- A receiver view for accepted and discarded packets
+- An event log that records sender, receiver, and channel activity
+- Completion logging that reports the number of steps and elapsed time
 
-How to run
+## Files
 
-1. Open `index.html` in a browser (or push to GitHub and enable Pages).
-2. Configure the window size `N`, sequence space `K`, number of packets, propagation delay, and any manual drops.
-3. Click `Start` to run the simulation. Use `Step` to send a single packet when allowed.
+- `index.html` — complete UI, styling, and simulator logic in one file
 
-Notes on implementation
+## How to run
 
-- Sender uses a single retransmission timer for the oldest unacknowledged packet.
-- Receiver accepts only in-order packets and sends cumulative ACKs.
-- Channel simulates fixed propagation delay and allows manual drops for data and ACKs.
+1. Open `index.html` in a browser.
+2. Set the window size `N`, sequence space `K`, number of packets, propagation delay, and any manual data/ACK drops.
+3. Click `Start` to run the simulation, or `Step` to advance one send action at a time.
+4. Use `Reset` to reload the page and begin again.
 
-Next improvements (optional):
+## Notes on implementation
 
-- Add packet corruption checks (checksum) and visualization of retransmission timings.
-- Add graphical animation of packets moving across the channel.
-- Add controls to schedule timed losses or random loss probabilities.
+- The sender uses a retransmission timer and retries unacknowledged packets within a bounded timeout limit.
+- The receiver accepts in-order packets, re-acks duplicates, and discards out-of-order data.
+- The channel simulates propagation delay and allows manual drops for both data packets and ACKs.
+
+## Possible future enhancements
+
+- Add animated packet movement through the channel
+- Add random loss probability controls
+- Add a visual timeline of ACK and retransmission events
