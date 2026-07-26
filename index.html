@@ -224,11 +224,13 @@
           return;
         }
         this.lastAck = ackNum;
+        const oldBase = this.base;
         const newBase = (ackNum + 1) % this.K;
         const removeList = [];
         for (let s of this.unacked){
-          const distance = (s - this.base + this.K) % this.K;
-          if (distance >= 0 && distance <= delta) removeList.push(s);
+          const distance = (s - oldBase + this.K) % this.K;
+          const span = (ackNum - oldBase + this.K) % this.K;
+          if (distance <= span) removeList.push(s);
         }
         removeList.forEach(s => this.unacked.delete(s));
         this.base = newBase;
