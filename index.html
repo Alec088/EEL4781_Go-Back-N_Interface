@@ -35,7 +35,8 @@
     #senderWindow .slot.acked{background:#b3e5ff}
     #senderWindow .slot.current{box-shadow:0 0 0 3px rgba(43,124,255,0.12)}
     .log{background:var(--panel);padding:12px;border-radius:8px}
-    #logArea{height:200px;overflow:auto;background:#0f1720;color:#e6ffe6;padding:8px;border-radius:4px;font-family:Consolas,monaco,monospace}
+    #logArea{height:200px;overflow:auto;background:#0f1720;color:#ffffff;padding:8px;border-radius:4px;font-family:Consolas,monaco,monospace}
+    #logArea .log-system{color:#ffffff}
     #logArea .log-sender{color:#d9f99d}
     #logArea .log-receiver{color:#bfdbfe}
     #logArea .log-channel{color:#fdba74}
@@ -101,10 +102,13 @@
   <script>
     // Go-Back-N simulator (sender, receiver, channel)
     const $ = id => document.getElementById(id);
+    let activeRunId = 0;
+
     const log = (msg, source='sender') => {
       const area = $('logArea');
       const time = new Date().toLocaleTimeString();
-      const sourceClass = source === 'receiver' ? 'log-receiver' : source === 'channel' ? 'log-channel' : 'log-sender';
+      const isSystemMessage = msg.startsWith('Simulation:');
+      const sourceClass = isSystemMessage ? 'log-system' : source === 'receiver' ? 'log-receiver' : source === 'channel' ? 'log-channel' : 'log-sender';
       const line = document.createElement('div');
       line.className = sourceClass;
       line.textContent = `[${time}] ${msg}`;
@@ -119,6 +123,7 @@
         this.dropAck = dropAckSet;
         this.droppedDataSeqs = new Set();
         this.droppedAckSeqs = new Set();
+        this.runId = activeRunId;
       }
       shouldDropData(seq) {
         if (!this.dropData.has(seq)) return false;
@@ -134,11 +139,13 @@
       }
       sendData(packet, toReceiver) {
         const shouldDrop = this.shouldDropData(packet.seq);
+        const runId = this.runId;
         showInChannel(`${packet.seq}`);
         setTimeout(() => {
+          if (runId !== activeRunId) return;
           removeFromChannel();
           if (shouldDrop) {
-            log(`Channel: dropped DATA ${packet.seq}`, 'channel');
+            log(`Channel: dropped DATA ${packet.seq} (data drop)`, 'channel');
             return;
           }
           toReceiver(packet);
@@ -146,11 +153,13 @@
       }
       sendAck(ackNum, toSender) {
         const shouldDrop = this.shouldDropAck(ackNum);
+        const runId = this.runId;
         showInChannel(`ACK ${ackNum}`);
         setTimeout(() => {
+          if (runId !== activeRunId) return;
           removeFromChannel();
           if (shouldDrop) {
-            log(`Channel: dropped ACK ${ackNum}`, 'channel');
+            log(`Channel: dropped ACK ${ackNum} (ACK drop)`, 'channel');
             return;
           }
           toSender(ackNum);
@@ -166,6 +175,7 @@
         this.channel = channel;
         this.received = new Set();
         this.buffer = new Map();
+        this.runId = activeRunId;
       }
       sendAck() {
         const ackNum = (this.expected + this.K - 1) % this.K;
@@ -188,6 +198,7 @@
         }
       }
       onData(packet) {
+        if (this.runId !== activeRunId) return;
         const seq = packet.seq;
         if (seq === this.expected) {
           this.acceptPacket(packet);
@@ -209,15 +220,15 @@
         this.base = 0; this.nextSeq = 0; this.sentCount = 0; this.retrans = 0;
         this.timer = null; this.buffer = [];
         this.unacked = new Set();
-        this.timeoutCount = 0;
-        this.maxTimeouts = Math.max(3, Math.ceil(this.total / 4));
         this.stepCount = 0;
         this.lastAck = -1;
+        this.runId = activeRunId;
         this.startTime = Date.now();
         for (let i=0;i<total;i++) this.buffer.push({seq:i%K,payload:`pkt${i}`});
       }
       canSend() { return ((this.nextSeq - this.base + this.K) % this.K) < this.N && this.sentCount < this.total; }
       sendNext() {
+        if (this.runId !== activeRunId) return false;
         if (!this.canSend()) return false;
         const packet = this.buffer[this.sentCount];
         log(`Sender: sending DATA ${packet.seq}`, 'sender');
@@ -227,36 +238,11 @@
         this.stepCount++;
         this.nextSeq = (this.nextSeq + 1) % this.K;
         updateSender(this.base, this.nextSeq, this.unacked);
-        if (!this.timer) this.startTimer();
         $('sentCount').textContent = `Sent: ${this.sentCount}`;
         return true;
       }
-      startTimer() {
-        this.stopTimer();
-        this.timer = setTimeout(() => this.timeout(), this.rto);
-      }
-      stopTimer(){ if(this.timer){clearTimeout(this.timer);this.timer=null;} }
-      timeout(){
-        this.timeoutCount += 1;
-        if (this.timeoutCount > this.maxTimeouts) {
-          log(`Sender: retransmission limit reached (${this.maxTimeouts}); stopping`, 'sender');
-          this.stopTimer();
-          return;
-        }
-
-        log(`Sender: timeout ${this.timeoutCount}/${this.maxTimeouts} — retransmitting from base ${this.base}`, 'sender');
-        this.retrans += this.unacked.size;
-        $('retransCount').textContent = `Retransmissions: ${this.retrans}`;
-        for (let i=0;i<this.sentCount;i++){
-          const p = this.buffer[i];
-          if (this.unacked.has(p.seq)){
-            log(`Sender: retransmit DATA ${p.seq}`, 'sender');
-            this.channel.sendData(p, receiver.onData.bind(receiver));
-          }
-        }
-        this.startTimer();
-      }
       onAck(ackNum){
+        if (this.runId !== activeRunId) return;
         log(`Sender: received ACK ${ackNum}`, 'sender');
         const delta = (ackNum - this.lastAck + this.K) % this.K;
         if (delta === 0) {
@@ -275,7 +261,6 @@
         removeList.forEach(s => this.unacked.delete(s));
         this.base = newBase;
         updateSender(this.base, this.nextSeq, this.unacked);
-        if (this.unacked.size === 0) this.stopTimer(); else this.startTimer();
         while(this.canSend()) this.sendNext();
         if (this.sentCount >= this.total && this.unacked.size === 0) {
           const elapsedSeconds = ((Date.now() - this.startTime) / 1000).toFixed(2);
@@ -329,6 +314,7 @@
     }
 
     function setupFromUI(){
+      activeRunId += 1;
       const N = parseInt($('winSize').value,10);
       const K = parseInt($('seqK').value,10);
       const total = parseInt($('totalPackets').value,10);
@@ -344,15 +330,15 @@
     }
 
     function resetSimulationView(){
-      if (!sender) {
-        $('senderWindow').innerHTML = '';
-        $('channelArea').textContent = '(packets in flight)';
-        $('receiverState').textContent = '';
-        $('logArea').textContent = '';
-        $('sentCount').textContent = 'Sent: 0';
-        $('recvCount').textContent = 'Delivered: 0';
-        $('retransCount').textContent = 'Retransmissions: 0';
-        return;
+      activeRunId += 1;
+      if (sender) {
+        sender.runId = activeRunId;
+      }
+      if (receiver) {
+        receiver.runId = activeRunId;
+      }
+      if (channel) {
+        channel.runId = activeRunId;
       }
 
       sender = null;
@@ -361,11 +347,12 @@
       $('senderWindow').innerHTML = '';
       $('channelArea').textContent = '(packets in flight)';
       $('receiverState').textContent = '';
-      $('logArea').textContent = '';
+      const logArea = $('logArea');
+      logArea.innerHTML = '';
+      logArea.textContent = '';
       $('sentCount').textContent = 'Sent: 0';
       $('recvCount').textContent = 'Delivered: 0';
       $('retransCount').textContent = 'Retransmissions: 0';
-      log('Simulation: reset');
     }
 
     document.addEventListener('DOMContentLoaded', () => {
